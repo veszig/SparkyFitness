@@ -2078,13 +2078,47 @@ describe('check-in tool output size and local times', () => {
     expect(
       result.startsWith(`# Custom Metrics History\n\n## ${newest}\n`)
     ).toBe(true);
-    expect(result).toContain('Older days were left out.');
-    // The cut falls between whole lines, never inside one.
-    const kept = result.split('\n\n---\n')[0]!;
-    expect(
-      kept.endsWith('- HRV: 50 ms') || /## \d{4}-\d{2}-\d{2}$/.test(kept)
-    ).toBe(true);
+    const shown = (result.match(/^## /gm) ?? []).length;
+    expect(result).toContain(
+      `showing the newest ${shown} of ${days.length} days; the ${days.length - shown} older days were left out.`
+    );
+    expect(result.split('\n\n---\n')[0]!.endsWith('- HRV: 50 ms')).toBe(true);
     expect(result).not.toContain(`## ${days[0]!.entry_date}\n`);
+  });
+
+  it('never shows the oldest kept day with only some of its metrics', async () => {
+    const metrics = Array.from(
+      { length: 30 },
+      (_, m) => `running_vertical_oscillation_${m}`
+    );
+    const rows = Array.from({ length: 12 }, (_, d) =>
+      metrics.map((name, m) => ({
+        id: `r${d}-${m}`,
+        value: '50',
+        entry_date: `2026-11-${String(d + 1).padStart(2, '0')}`,
+        custom_categories: { id: `k${m}`, name, measurement_type: 'ms' },
+      }))
+    ).flat();
+    vi.mocked(
+      measurementService.getCustomMeasurementEntriesByDateRange
+    ).mockResolvedValue(rows);
+
+    const result = (await tools.sparky_manage_checkin.execute!(
+      { action: 'get_custom_metrics_history' },
+      opts
+    )) as string;
+
+    const [kept, note] = result.split('\n\n---\n');
+    const blocks = kept!.split('\n\n').slice(1);
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(blocks.length).toBeLessThan(12);
+    for (const block of blocks) {
+      expect(block.split('\n')).toHaveLength(1 + metrics.length);
+    }
+    expect(note).toContain(
+      `showing the newest ${blocks.length} of 12 days; the ${12 - blocks.length} older days were left out.`
+    );
+    expect(result.length).toBeLessThanOrEqual(8_000);
   });
 
   it('leaves raw data series out of the biometrics history', async () => {

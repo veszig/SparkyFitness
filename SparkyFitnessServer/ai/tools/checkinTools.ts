@@ -35,7 +35,11 @@ import {
   formatList,
   formatSuccess,
 } from './formatting.js';
-import { NOTE_PREVIEW_LIMIT, truncateIfNeeded } from './truncation.js';
+import {
+  getCharacterLimit,
+  NOTE_PREVIEW_LIMIT,
+  truncateIfNeeded,
+} from './truncation.js';
 import { convertWeight, convertMeasurement } from './unitConversion.js';
 import {
   manageCheckinSchema,
@@ -1096,12 +1100,27 @@ Actions:
                 lines.push(`- ${label}: ${value}${unit}`);
                 byDay.set(day, lines);
               }
-              const body = [...byDay.entries()]
+              const dayBlocks = [...byDay.entries()]
                 .sort(([a], [b]) => b.localeCompare(a))
-                .map(([day, lines]) => `## ${day}\n${lines.join('\n')}`)
-                .join('\n\n');
+                .map(([day, lines]) => `## ${day}\n${lines.join('\n')}`);
+              // Cut at whole days and count what was left out: a day cut
+              // mid-list reads as a day without the missing metrics.
+              const header = '# Custom Metrics History\n\n';
+              const budget = getCharacterLimit('full') - 300;
+              let size = header.length;
+              let kept = 0;
+              for (const block of dayBlocks) {
+                if (kept > 0 && size + block.length > budget) break;
+                size += block.length + 2;
+                kept++;
+              }
+              const omitted = dayBlocks.length - kept;
+              const note =
+                omitted > 0
+                  ? `\n\n---\n⚠️ Response truncated: showing the newest ${kept} of ${dayBlocks.length} days; the ${omitted} older days were left out. Pass a later start_date, or category_name, to see them.`
+                  : '';
               return truncateIfNeeded(
-                `# Custom Metrics History\n\n${body}`,
+                header + dayBlocks.slice(0, kept).join('\n\n') + note,
                 'Older days were left out. Pass start_date and end_date, or category_name, to narrow the history.',
                 'full',
                 true
